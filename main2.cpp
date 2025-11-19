@@ -330,15 +330,14 @@ bool verifyMatrices(Matrix& C1, Matrix& C2, int n) {
 }
 
 int main(int argc, char** argv) {
-    // Initialize MPI first (safe to call even if run with one process)
+    // Initialize MPI for distributed-memory execution on 2 CPU cluster
     MPI_Init(&argc, &argv);
-    int world_size = 1;
-    int world_rank = 0;
+    int rank = 0, world_size = 1;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
     int n = 0;
-    if (world_rank == 0) {
+    if (rank == 0) {
         cout << "Enter matrix size: ";
         cin >> n;
         if (n <= 0) {
@@ -367,23 +366,23 @@ int main(int argc, char** argv) {
         Matrix C_naive(n, vector<long long>(n, 0));
 
         // Test Naive
-        if (world_rank == 0) cout << "\n[1] NAIVE ALGORITHM" << endl;
+        if (rank == 0) cout << "\n[1] NAIVE ALGORITHM" << endl;
         double start_naive = omp_get_wtime();
         naiveMultiply(A_naive, B_naive, C_naive, n);
         double end_naive = omp_get_wtime();
         double time_naive = end_naive - start_naive;
-        if (world_rank == 0) {
+        if (rank == 0) {
             cout << "Computation time: " << time_naive << " s" << endl;
             cout << "Result: C[0][0] = " << C_naive[0][0] << endl;
         }
 
         // Test Strassen
-        if (world_rank == 0) cout << "\n[2] STRASSEN ALGORITHM" << endl;
+        if (rank == 0) cout << "\n[2] STRASSEN ALGORITHM" << endl;
         double start_strassen = omp_get_wtime();
         strassenPad(A_strassen, B_strassen, C_strassen, n);
         double end_strassen = omp_get_wtime();
         double time_strassen = end_strassen - start_strassen;
-        if (world_rank == 0) {
+        if (rank == 0) {
             cout << "Computation time: " << time_strassen << " s" << endl;
             cout << "Result: C[0][0] = " << C_strassen[0][0] << endl;
 
@@ -412,12 +411,12 @@ int main(int argc, char** argv) {
     int rem = n % world_size;
     for (int i = 0; i < world_size; ++i) rows_per_rank[i] = base + (i < rem ? 1 : 0);
 
-    int local_rows = rows_per_rank[world_rank];
+    int local_rows = rows_per_rank[rank];
 
     vector<long long> Aflat; // only filled on root
     vector<long long> Bflat(n * n);
     vector<int> sendcounts(world_size), displs(world_size);
-    if (world_rank == 0) {
+    if (rank == 0) {
         Matrix A(n, vector<long long>(n, 0));
         Matrix B(n, vector<long long>(n, 0));
         generateRandomMatrix(A, n);
@@ -437,7 +436,7 @@ int main(int argc, char** argv) {
     }
 
     // Broadcast Bflat to all ranks
-    if (world_rank == 0) {
+    if (rank == 0) {
         MPI_Bcast(Bflat.data(), n * n, MPI_LONG_LONG, 0, MPI_COMM_WORLD);
     } else {
         MPI_Bcast(Bflat.data(), n * n, MPI_LONG_LONG, 0, MPI_COMM_WORLD);
@@ -480,7 +479,7 @@ int main(int argc, char** argv) {
     if (local_rows > 0) flattenMatrix(localC, localCflat, local_rows, n);
 
     vector<long long> Cflat;
-    if (world_rank == 0) Cflat.resize(n * n);
+    if (rank == 0) Cflat.resize(n * n);
 
     MPI_Gatherv(
         localCflat.empty() ? nullptr : localCflat.data(),
@@ -494,7 +493,7 @@ int main(int argc, char** argv) {
         MPI_COMM_WORLD
     );
 
-    if (world_rank == 0) {
+    if (rank == 0) {
         // Unflatten gathered C
         Matrix Cres(n, vector<long long>(n, 0));
         unflattenMatrix(Cflat, Cres, n, n);
